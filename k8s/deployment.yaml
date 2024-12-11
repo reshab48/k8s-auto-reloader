@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-app
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flask-app
+  template:
+    metadata:
+      labels:
+        app: flask-app
+    spec:
+      securityContext:
+        fsGroup: 1000
+      volumes:
+        - name: app-volume
+          persistentVolumeClaim:
+            claimName: app-pvc
+      containers:
+        - name: flask-app
+          image: flask-app:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+          env:
+            - name: FLASK_APP
+              value: /app/latest/app.py
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: app-volume
+              mountPath: /app
+          ports:
+            - containerPort: 5000
+        - name: git-sync
+          image: registry.k8s.io/git-sync/git-sync:v4.2.3
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+          args:
+            - --repo=https://github.com/reshab48/k8s-auto-reloader
+            - --root=/git
+            - --period=30s
+            - --ref=main
+            - --link=latest
+            - --max-failures=10
+            - -v=2
+          volumeMounts:
+            - name: app-volume
+              mountPath: /git
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-app-service
+  namespace: default
+  labels:
+    app: flask-app-service
+spec:
+  selector:
+    app: flask-app
+  type: ClusterIP
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 5000
